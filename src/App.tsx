@@ -685,8 +685,20 @@ function AudioRecorder({
 
   const startRecording = async () => {
     try {
+      if (typeof MediaRecorder === 'undefined') {
+        throw new Error("Recording not supported on this device/browser.");
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+
+      // Determine supported MIME type for mobile (especially Safari/iOS)
+      const mimeType = [
+        'audio/webm',
+        'audio/mp4',
+        'audio/ogg',
+        'audio/wav'
+      ].find(type => MediaRecorder.isTypeSupported(type)) || '';
+
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       mediaRecorderRef.current = recorder;
       chunksRef.current = [];
 
@@ -695,9 +707,19 @@ function AudioRecorder({
       };
 
       recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        const url = URL.createObjectURL(blob);
-        onSave(url);
+        // Use the actual mimeType from the recorder
+        const actualType = recorder.mimeType || 'audio/webm';
+        const blob = new Blob(chunksRef.current, { type: actualType });
+
+        // Convert Blob to Base64 to allow persistence in localStorage
+        // This is key for mobile "saving" as blob: URLs are destroyed on refresh
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64Audio = reader.result as string;
+          onSave(base64Audio);
+        };
+        reader.readAsDataURL(blob);
+
         stream.getTracks().forEach(track => track.stop());
       };
 
@@ -706,9 +728,11 @@ function AudioRecorder({
       timerRef.current = window.setInterval(() => {
         setRecordingTime(prev => prev + 1);
       }, 1000);
-    } catch (err) {
-      console.error("Microphone access denied", err);
-      alert("Please allow microphone access to record audio feedback.");
+    } catch (err: any) {
+      console.error("Microphone access denied or unsupported", err);
+      alert(err.message === "Recording not supported on this device/browser."
+        ? err.message
+        : "Please allow microphone access to record audio feedback. Note: Most browsers require HTTPS for microphone access.");
       onCancel();
     }
   };
@@ -1200,7 +1224,7 @@ function ReviewView({
                             </p>
                             <p className="text-[11px] text-zinc-300 font-medium leading-snug mb-2">{tooltipText}</p>
                             {c.type === 'audio' && c.audioUrl && (
-                              <audio src={c.audioUrl} controls className="w-full h-7 opacity-80" />
+                              <audio src={c.audioUrl} controls className="w-full h-10 opacity-80" preload="metadata" />
                             )}
                             <button
                               onClick={(e) => { e.stopPropagation(); scrollToComment(c.id); }}
@@ -1436,7 +1460,7 @@ function ReviewView({
                       )}
 
                       {comment.audioUrl && (
-                        <audio src={comment.audioUrl} controls className="w-full h-8 opacity-60 invert" />
+                        <audio src={comment.audioUrl} controls className="w-full h-10 opacity-60 invert" preload="metadata" />
                       )}
 
                       {comment.drawing?.paths?.length > 0 && (
