@@ -81,10 +81,11 @@ const transformVideoUrl = (url: string) => {
   if (!url) return '';
 
   // Google Drive
-  if (url.includes('drive.google.com')) {
+  if (url.includes('drive.google.com') || url.includes('docs.google.com')) {
     const fileId = extractDriveId(url);
     if (fileId) {
-      return `https://drive.google.com/uc?export=download&id=${fileId}`;
+      // docs.google.com uc links are sometimes more reliable for streaming than drive.google.com
+      return `https://docs.google.com/uc?export=download&id=${fileId}`;
     }
   }
 
@@ -999,6 +1000,8 @@ function ReviewView({
     // Auto-visible for 1s by default; no persistent selection pinning
   };
 
+  const [showIframeFallback, setShowIframeFallback] = useState(false);
+
   return (
     <div
       ref={containerRef}
@@ -1049,23 +1052,25 @@ function ReviewView({
         <div className="flex-[3] flex flex-col relative bg-black">
           <div className="relative flex-1 flex items-center justify-center bg-black overflow-hidden group">
             <div className="w-full aspect-video relative shadow-2xl z-10">
-              {/* Unified video renderer: iframe for YouTube/Drive, ReactPlayer for direct files */}
-              {isYouTubeEmbed ? (
+              {/* Unified video renderer: iframe for YouTube/Drive (if fallback), HTML5 for others */}
+              {(isYouTubeEmbed || (isDriveEmbed && showIframeFallback)) ? (
                 <iframe
                   key={project.videoUrl}
                   ref={iframeRef}
-                  src={project.videoUrl}
+                  src={isDriveEmbed && showIframeFallback ? `https://drive.google.com/file/d/${extractDriveId(project.videoUrl)}/preview` : project.videoUrl}
                   className="w-full h-full relative z-0"
                   allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
                   allowFullScreen
-                  title="YouTube Player"
+                  title="Video Player"
                   onLoad={() => {
-                    setTimeout(() => {
-                      iframeRef.current?.contentWindow?.postMessage(
-                        JSON.stringify({ event: 'listening', id: 1 }),
-                        '*'
-                      );
-                    }, 500);
+                    if (isYouTubeEmbed) {
+                      setTimeout(() => {
+                        iframeRef.current?.contentWindow?.postMessage(
+                          JSON.stringify({ event: 'listening', id: 1 }),
+                          '*'
+                        );
+                      }, 500);
+                    }
                   }}
                 />
               ) : (
@@ -1087,10 +1092,10 @@ function ReviewView({
                   onPause={() => setPlaying(false)}
                   onEnded={() => setPlaying(false)}
                   onError={(e) => {
-                    console.error("Video Error:", e);
-                    // Inform the user about likely Google Drive restrictions
-                    if (project.videoUrl.includes('drive.google.com')) {
-                      alert("Google Drive video blocked. This usually happens because Google blocks direct streaming in third-party apps for security. Try a YouTube link or a direct MP4 URL instead.");
+                    console.error("Video block detected:", e);
+                    if (isDriveEmbed) {
+                      setShowIframeFallback(true);
+                      alert("Direct stream was blocked by Google. Switching to standard preview as it is.");
                     }
                   }}
                   onClick={() => {
