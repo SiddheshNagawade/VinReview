@@ -1076,6 +1076,7 @@ function ReviewView({
                   className="w-full h-full relative z-0 bg-black"
                   controls={false}
                   playsInline
+                  crossOrigin="anonymous"
                   onTimeUpdate={(e) => {
                     const video = e.currentTarget;
                     setCurrentTime(video.currentTime);
@@ -1085,6 +1086,13 @@ function ReviewView({
                   onPlay={() => setPlaying(true)}
                   onPause={() => setPlaying(false)}
                   onEnded={() => setPlaying(false)}
+                  onError={(e) => {
+                    console.error("Video Error:", e);
+                    // Inform the user about likely Google Drive restrictions
+                    if (project.videoUrl.includes('drive.google.com')) {
+                      alert("Google Drive video blocked. This usually happens because Google blocks direct streaming in third-party apps for security. Try a YouTube link or a direct MP4 URL instead.");
+                    }
+                  }}
                   onClick={() => {
                     if (playerRef.current) {
                       if (playerRef.current.paused) playerRef.current.play();
