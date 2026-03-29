@@ -18,6 +18,10 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+function extractDriveId(url: string) {
+  return url.match(/\/file\/d\/([^\/]+)/)?.[1] || url.match(/id=([^\&]+)/)?.[1];
+}
+
 function formatTime(seconds: number) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -78,9 +82,9 @@ const transformVideoUrl = (url: string) => {
 
   // Google Drive
   if (url.includes('drive.google.com')) {
-    const fileId = url.match(/\/file\/d\/([^\/]+)/)?.[1] || url.match(/id=([^\&]+)/)?.[1];
+    const fileId = extractDriveId(url);
     if (fileId) {
-      return `https://drive.google.com/file/d/${fileId}/preview`;
+      return `https://drive.google.com/uc?export=download&id=${fileId}`;
     }
   }
 
@@ -807,7 +811,9 @@ function ReviewView({
   const commentRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const isYouTubeEmbed = project.videoUrl.includes('youtube.com/embed/');
   const isDriveEmbed = project.videoUrl.includes('drive.google.com');
-  const isEmbedVideo = isYouTubeEmbed || isDriveEmbed;
+  // We only use the specialized iframe logic for YouTube because it has a postMessage API.
+  // Google Drive preview iframes don't, so we now force them to use ReactPlayer for control sync.
+  const isEmbedVideo = isYouTubeEmbed;
   const [hoveredComment, setHoveredComment] = useState<string | null>(null);
   const [highlightedComment, setHighlightedComment] = useState<string | null>(null);
   const [hiddenDrawingIds, setHiddenDrawingIds] = useState<string[]>([]);
@@ -875,6 +881,20 @@ function ReviewView({
     return () => window.removeEventListener('message', handleMessage);
   }, [isYouTubeEmbed]);
 
+  // Sync playing state with HTML5 video element
+  useEffect(() => {
+    if (isYouTubeEmbed || !playerRef.current) return;
+
+    if (playing) {
+      playerRef.current.play().catch(err => {
+        console.error("Playback failed:", err);
+        setPlaying(false);
+      });
+    } else {
+      playerRef.current.pause();
+    }
+  }, [playing, isYouTubeEmbed, project.videoUrl]); // Re-sync if project video changes
+
   const filteredComments = project.comments.filter(c => {
     if (filter === 'unresolved') return !c.resolved;
     if (filter === 'resolved') return c.resolved;
@@ -892,7 +912,6 @@ function ReviewView({
         JSON.stringify({ event: 'command', func: 'seekTo', args: [time, true] }),
         '*'
       );
-      // Restore play state after seek
       if (playing) {
         setTimeout(() => {
           iframeRef.current?.contentWindow?.postMessage(
@@ -901,8 +920,9 @@ function ReviewView({
           );
         }, 100);
       }
-    } else {
-      playerRef.current?.seekTo(time, 'seconds');
+    } else if (playerRef.current) {
+      // Standard HTML5 Video seeking
+      playerRef.current.currentTime = time;
     }
     setCurrentTime(time);
     // NOTE: do NOT call setPlaying() here — preserve existing state
@@ -1030,47 +1050,60 @@ function ReviewView({
           <div className="relative flex-1 flex items-center justify-center bg-black overflow-hidden group">
             <div className="w-full aspect-video relative shadow-2xl z-10">
               {/* Unified video renderer: iframe for YouTube/Drive, ReactPlayer for direct files */}
-              {isEmbedVideo ? (
+              {isYouTubeEmbed ? (
                 <iframe
                   key={project.videoUrl}
-                  ref={isYouTubeEmbed ? iframeRef : undefined}
+                  ref={iframeRef}
                   src={project.videoUrl}
                   className="w-full h-full relative z-0"
                   allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
                   allowFullScreen
-                  title="Video Player"
+                  title="YouTube Player"
                   onLoad={() => {
-                    // Subscribe YouTube iframe to send info on ready
-                    if (isYouTubeEmbed) {
-                      setTimeout(() => {
-                        iframeRef.current?.contentWindow?.postMessage(
-                          JSON.stringify({ event: 'listening', id: 1 }),
-                          '*'
-                        );
-                      }, 500);
-                    }
+                    setTimeout(() => {
+                      iframeRef.current?.contentWindow?.postMessage(
+                        JSON.stringify({ event: 'listening', id: 1 }),
+                        '*'
+                      );
+                    }, 500);
                   }}
                 />
               ) : (
-                <ReactPlayer
-                  ref={playerRef}
+                <video
                   key={project.videoUrl}
-                  {...({
-                    url: project.videoUrl,
-                    width: "100%",
-                    height: "100%",
-                    playing: playing,
-                    onProgress: handleProgress,
-                    onReady: (player: any) => {
-                      if (player && player.getDuration) setDuration(player.getDuration());
-                    },
-                    onError: (e: any) => console.error('Player Error', e),
-                    playsinline: true,
-                    controls: true,
-                    onPlay: () => setPlaying(true),
-                    onPause: () => setPlaying(false),
-                  } as any)}
+                  ref={playerRef}
+                  src={project.videoUrl}
+                  className="w-full h-full relative z-0 bg-black"
+                  controls={false}
+                  playsInline
+                  onTimeUpdate={(e) => {
+                    const video = e.currentTarget;
+                    setCurrentTime(video.currentTime);
+                  }}
+                  onDurationChange={(e) => setDuration(e.currentTarget.duration)}
+                  onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+                  onPlay={() => setPlaying(true)}
+                  onPause={() => setPlaying(false)}
+                  onEnded={() => setPlaying(false)}
+                  onClick={() => {
+                    if (playerRef.current) {
+                      if (playerRef.current.paused) playerRef.current.play();
+                      else playerRef.current.pause();
+                    }
+                  }}
                 />
+              )}
+
+              {/* Playback indicator for custom video element */}
+              {!isYouTubeEmbed && !playing && (
+                <div
+                  className="absolute inset-0 flex items-center justify-center pointer-events-none z-10"
+                  onClick={() => playerRef.current?.play()}
+                >
+                  <div className="w-20 h-20 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20">
+                    <Play size={40} className="text-white fill-white ml-2" />
+                  </div>
+                </div>
               )}
 
               <DrawingOverlay
@@ -1184,6 +1217,11 @@ function ReviewView({
                   <motion.div
                     className="absolute left-0 top-0 h-full bg-gradient-to-r from-orange-600 to-orange-400 rounded-full z-10"
                     style={{ width: `${(currentTime / duration) * 100}%` }}
+                  />
+                  {/* Vertical Playhead Line */}
+                  <motion.div
+                    className="absolute top-[-4px] bottom-[-4px] w-1 bg-white shadow-[0_0_10px_rgba(255,255,255,0.5)] z-30 rounded-full"
+                    style={{ left: `${(currentTime / duration) * 100}%` }}
                   />
                   {filteredComments.map(c => {
                     const dotColor = c.resolved
