@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import React, { useState, useEffect, useRef } from 'react';
 import ReactPlayer from 'react-player';
 import { motion, AnimatePresence } from 'motion/react';
@@ -60,6 +61,11 @@ interface Project {
   id: string;
   name: string;
   videoUrl: string;
+  fileId?: string;           // Google Drive fileId for health checks
+  sourceType?: 'drive' | 'youtube' | 'direct'; // How the video was ingested
+  thumbnailUrl?: string;     // Cached from Drive API on ingest
+  videoDuration?: number;    // Cached from Drive API on ingest (seconds)
+  sourceMissing?: boolean;   // Transient: set by health check on dashboard load
   comments: Comment[];
   isApproved: boolean;
   createdAt: number;
@@ -130,6 +136,138 @@ const isValidVideoUrl = (url: string) => {
 };
 
 // --- App Component ---
+
+// --- Google API Utilities ---
+const GAPI_CLIENT_ID = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID as string | undefined;
+const GAPI_API_KEY = (import.meta as any).env?.VITE_GOOGLE_API_KEY as string | undefined;
+
+declare global {
+  interface Window {
+    gapi: any;
+    google: any;
+  }
+}
+
+function loadGapiIfNeeded(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (window.gapi?.client) return resolve();
+    if (!window.gapi) return reject(new Error('Google API script not loaded'));
+    window.gapi.load('client:auth2:picker', {
+      callback: resolve,
+      onerror: reject,
+    });
+  });
+}
+
+async function getAccessToken(scope: string): Promise<string> {
+  if (!GAPI_CLIENT_ID) throw new Error('Missing VITE_GOOGLE_CLIENT_ID in .env');
+  await loadGapiIfNeeded();
+  const authInstance = window.gapi.auth2.getAuthInstance();
+  if (!authInstance) {
+    await window.gapi.auth2.init({ client_id: GAPI_CLIENT_ID, scope });
+  }
+  const user = await window.gapi.auth2.getAuthInstance().signIn({ scope });
+  return user.getAuthResponse().access_token;
+}
+
+interface DrivePickResult {
+  fileId: string;
+  name: string;
+  thumbnailUrl?: string;
+  mimeType: string;
+}
+
+function openDrivePicker(accessToken: string): Promise<DrivePickResult | null> {
+  return new Promise((resolve) => {
+    if (!GAPI_API_KEY) { alert('Missing VITE_GOOGLE_API_KEY in .env'); resolve(null); return; }
+    const picker = new window.google.picker.PickerBuilder()
+      .addView(new window.google.picker.View(window.google.picker.ViewId.DOCS_VIDEOS))
+      .setOAuthToken(accessToken)
+      .setDeveloperKey(GAPI_API_KEY)
+      .setCallback((data: any) => {
+        if (data.action === window.google.picker.Action.PICKED) {
+          const doc = data.docs[0];
+          resolve({
+            fileId: doc.id,
+            name: doc.name,
+            thumbnailUrl: doc.thumbnailLink ?? undefined,
+            mimeType: doc.mimeType,
+          });
+        } else if (data.action === window.google.picker.Action.CANCEL) {
+          resolve(null);
+        }
+      })
+      .build();
+    picker.setVisible(true);
+  });
+}
+
+async function checkDriveFileExists(fileId: string): Promise<boolean> {
+  if (!GAPI_API_KEY) return true; // Can't check, assume fine
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?fields=trashed&key=${GAPI_API_KEY}`
+    );
+    if (!res.ok) return false; // 404 = deleted
+    const data = await res.json();
+    return !data.trashed;
+  } catch {
+    return true; // Network error: assume OK
+  }
+}
+
+async function uploadToDriveViaYouTube(
+  fileId: string,
+  videoTitle: string,
+  accessToken: string,
+  onProgress?: (pct: number) => void
+): Promise<string> {
+  // Step 1: Get the Drive file download URL (streamed via fetch with user's token)
+  const driveRes = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!driveRes.ok) throw new Error('Could not download Drive file. Check permissions.');
+  const blob = await driveRes.blob();
+  onProgress?.(20);
+
+  // Step 2: Initialize resumable YouTube upload
+  const initRes = await fetch(
+    'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'X-Upload-Content-Type': blob.type,
+        'X-Upload-Content-Length': String(blob.size),
+      },
+      body: JSON.stringify({
+        snippet: { title: videoTitle, description: 'Uploaded via VinReview' },
+        status: { privacyStatus: 'unlisted' },
+      }),
+    }
+  );
+  if (!initRes.ok) throw new Error('YouTube upload init failed. Ensure YouTube Data API is enabled.');
+  const uploadUrl = initRes.headers.get('Location');
+  if (!uploadUrl) throw new Error('No upload URL from YouTube.');
+  onProgress?.(30);
+
+  // Step 3: Upload the blob
+  const uploadRes = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': blob.type },
+    body: blob,
+  });
+  if (!uploadRes.ok) throw new Error('YouTube file upload failed.');
+  const videoData = await uploadRes.json();
+  onProgress?.(100);
+
+  const ytVideoId = videoData.id;
+  return `https://www.youtube.com/embed/${ytVideoId}?enablejsapi=1&modestbranding=1&rel=0&controls=1&playsinline=1`;
+}
+// --- /Google API Utilities ---
+
 export default function App() {
   const [projects, setProjects] = useState<Project[]>(() => {
     const saved = localStorage.getItem('vinreview_projects');
@@ -165,11 +303,15 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  const addProject = (name: string, videoUrl: string) => {
+  const addProject = (name: string, videoUrl: string, meta?: Partial<Project>) => {
     const newProject: Project = {
       id: nanoid(),
       name,
       videoUrl,
+      fileId: meta?.fileId,
+      sourceType: meta?.sourceType,
+      thumbnailUrl: meta?.thumbnailUrl,
+      videoDuration: meta?.videoDuration,
       comments: [],
       isApproved: false,
       createdAt: Date.now(),
@@ -256,6 +398,7 @@ export default function App() {
             onAddComment={(comment) => addComment(activeProject.id, comment)}
             onApprove={() => toggleApproval(activeProject.id)}
             onToggleCommentResolution={(commentId) => toggleCommentResolution(activeProject.id, commentId)}
+            onUpdateProject={(updates) => setProjects(prev => prev.map(p => p.id === activeProject.id ? { ...p, ...updates } : p))}
           />
         )}
         {currentView === 'review' && !activeProject && (
@@ -271,6 +414,18 @@ export default function App() {
 
 // --- Dashboard View ---
 function DashboardView({ projects, onDelete }: { projects: Project[], onDelete: (id: string) => void }) {
+  const [missingIds, setMissingIds] = useState<string[]>([]);
+
+  // On mount: silently check if Drive files still exist
+  useEffect(() => {
+    const driveProjects = projects.filter(p => p.fileId);
+    if (!driveProjects.length) return;
+    driveProjects.forEach(async (p) => {
+      const exists = await checkDriveFileExists(p.fileId!);
+      if (!exists) setMissingIds(prev => [...prev, p.id]);
+    });
+  }, []);
+
   const container = {
     hidden: { opacity: 0 },
     show: {
@@ -327,91 +482,129 @@ function DashboardView({ projects, onDelete }: { projects: Project[], onDelete: 
         </motion.div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {projects.map(project => (
-            <motion.div
-              key={project.id}
-              variants={item}
-              whileHover={{ y: -3, transition: { duration: 0.1 } }}
-              className="group bg-zinc-900/40 border border-zinc-800/50 p-4 rounded-2xl flex flex-col justify-between gap-4 transition-colors hover:border-orange-500/30 hover:bg-zinc-900/60 relative overflow-hidden"
-            >
-              {project.isApproved && (
-                <div className="absolute top-0 right-0 bg-green-600 text-white text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-bl-lg flex items-center gap-1">
-                  <Check size={10} strokeWidth={4} />
-                  Approved
-                </div>
-              )}
-
-              <div>
-                <div className="w-full aspect-video bg-zinc-950 rounded-lg mb-3 overflow-hidden border border-zinc-800/50 group-hover:border-orange-500/20 transition-colors relative">
-                  {getThumbnailUrl(project.videoUrl) ? (
-                    <>
-                      <img
-                        src={getThumbnailUrl(project.videoUrl)!}
-                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500 opacity-60 group-hover:opacity-100"
-                        alt={project.name}
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
-                    </>
-                  ) : (
-                    <div className="w-full h-full bg-gradient-to-br from-zinc-800 to-zinc-950 flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
-                      <Play size={28} className="text-zinc-700 group-hover:text-orange-500/50 transition-colors" />
-                    </div>
-                  )}
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-12 h-12 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 group-hover:scale-110 group-hover:bg-orange-500 group-hover:border-orange-400 transition-all">
-                      <Play size={20} className="text-white fill-white ml-1" />
-                    </div>
+          {projects.map(project => {
+            const isMissing = missingIds.includes(project.id);
+            const thumb = project.thumbnailUrl || getThumbnailUrl(project.videoUrl);
+            return (
+              <motion.div
+                key={project.id}
+                variants={item}
+                whileHover={{ y: -3, transition: { duration: 0.1 } }}
+                className="group bg-zinc-900/40 border border-zinc-800/50 p-4 rounded-2xl flex flex-col justify-between gap-4 transition-colors hover:border-orange-500/30 hover:bg-zinc-900/60 relative overflow-hidden"
+              >
+                {project.isApproved && (
+                  <div className="absolute top-0 right-0 bg-green-600 text-white text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-bl-lg flex items-center gap-1">
+                    <Check size={10} strokeWidth={4} />
+                    Approved
                   </div>
-                </div>
-                <h3 className="text-base font-black italic uppercase tracking-tighter group-hover:text-orange-500 transition-colors line-clamp-1">
-                  {project.name}
-                </h3>
-                <p className="text-[9px] text-zinc-600 font-bold uppercase tracking-widest mt-0.5">
-                  {project.comments.length} comments · {new Date(project.createdAt).toLocaleDateString()}
-                </p>
-              </div>
+                )}
 
-              <div className="flex items-center gap-2 pt-3 border-t border-zinc-800/30">
-                <a
-                  href={`#/review/${project.id}`}
-                  className="flex-1 bg-zinc-900 border border-zinc-700 hover:border-orange-500/50 hover:bg-orange-500/10 hover:text-orange-400 text-zinc-200 py-2.5 rounded-lg font-black italic uppercase tracking-tighter text-[10px] text-center transition-all flex items-center justify-center gap-1.5"
-                >
-                  <ExternalLink size={13} />
-                  Open Review
-                </a>
-                <button
-                  onClick={() => {
-                    const url = `${window.location.origin}${window.location.pathname}#/review/${project.id}`;
-                    navigator.clipboard.writeText(url).then(() => alert('Link copied!')).catch(() => alert('Link copied!'));
-                  }}
-                  className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-700 hover:border-blue-500/50 hover:bg-blue-500/10 hover:text-blue-400 transition-all text-zinc-400"
-                  title="Copy Link"
-                >
-                  <Share2 size={15} />
-                </button>
-                <button
-                  onClick={() => {
-                    if (confirm('Delete this project?')) onDelete(project.id);
-                  }}
-                  className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-700 hover:border-red-500/50 hover:bg-red-500/10 hover:text-red-400 transition-all text-zinc-400"
-                  title="Delete"
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            </motion.div>
-          ))}
+                <div>
+                  <div className="w-full aspect-video bg-zinc-950 rounded-lg mb-3 overflow-hidden border border-zinc-800/50 group-hover:border-orange-500/20 transition-colors relative">
+                    {thumb ? (
+                      <>
+                        <img
+                          src={thumb}
+                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500 opacity-60 group-hover:opacity-100"
+                          alt={project.name}
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                      </>
+                    ) : (
+                      <div className="w-full h-full bg-gradient-to-br from-zinc-800 to-zinc-950 flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
+                        <Play size={28} className="text-zinc-700 group-hover:text-orange-500/50 transition-colors" />
+                      </div>
+                    )}
+                    {/* Source Missing Overlay */}
+                    {isMissing && (
+                      <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center gap-2 backdrop-blur-sm">
+                        <XCircle size={28} className="text-red-400" />
+                        <span className="text-[10px] font-black uppercase tracking-widest text-red-400">Source Missing</span>
+                        <span className="text-[9px] text-zinc-500 text-center px-4">The Drive file was deleted or moved. Thumbnail cached.</span>
+                      </div>
+                    )}
+                    {!isMissing && (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="w-12 h-12 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 group-hover:scale-110 group-hover:bg-orange-500 group-hover:border-orange-400 transition-all">
+                          <Play size={20} className="text-white fill-white ml-1" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <h3 className="text-base font-black italic uppercase tracking-tighter group-hover:text-orange-500 transition-colors line-clamp-1">
+                    {project.name}
+                  </h3>
+                  <p className="text-[9px] text-zinc-600 font-bold uppercase tracking-widest mt-0.5">
+                    {project.comments.length} comments · {new Date(project.createdAt).toLocaleDateString()}
+                    {project.sourceType === 'drive' && <span className="ml-2 text-blue-500">· Drive</span>}
+                    {project.sourceType === 'youtube' && <span className="ml-2 text-red-500">· YouTube</span>}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 pt-3 border-t border-zinc-800/30">
+                  <a
+                    href={`#/review/${project.id}`}
+                    className="flex-1 bg-zinc-900 border border-zinc-700 hover:border-orange-500/50 hover:bg-orange-500/10 hover:text-orange-400 text-zinc-200 py-2.5 rounded-lg font-black italic uppercase tracking-tighter text-[10px] text-center transition-all flex items-center justify-center gap-1.5"
+                  >
+                    <ExternalLink size={13} />
+                    Open Review
+                  </a>
+                  <button
+                    onClick={() => {
+                      const url = `${window.location.origin}${window.location.pathname}#/review/${project.id}`;
+                      navigator.clipboard.writeText(url).then(() => alert('Link copied!')).catch(() => alert('Link copied!'));
+                    }}
+                    className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-700 hover:border-blue-500/50 hover:bg-blue-500/10 hover:text-blue-400 transition-all text-zinc-400"
+                    title="Copy Link"
+                  >
+                    <Share2 size={15} />
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (confirm('Delete this project?')) onDelete(project.id);
+                    }}
+                    className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-700 hover:border-red-500/50 hover:bg-red-500/10 hover:text-red-400 transition-all text-zinc-400"
+                    title="Delete"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </motion.div>
+            );
+          })}
         </div>
       )}
     </motion.div>
   );
 }
 
+
 // --- Upload View ---
-function UploadView({ onUpload }: { onUpload: (name: string, url: string) => void }) {
+function UploadView({ onUpload }: { onUpload: (name: string, url: string, meta?: Partial<Project>) => void }) {
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [driveFile, setDriveFile] = useState<{ fileId: string; thumbnailUrl?: string } | null>(null);
+
+  const handleDrivePick = async () => {
+    setPickerLoading(true);
+    setError('');
+    try {
+      const token = await getAccessToken('https://www.googleapis.com/auth/drive.readonly');
+      const result = await openDrivePicker(token);
+      if (result) {
+        const driveUrl = `https://drive.google.com/file/d/${result.fileId}/view`;
+        setName(result.name.replace(/\.[^/.]+$/, '')); // strip extension
+        setUrl(driveUrl);
+        setDriveFile({ fileId: result.fileId, thumbnailUrl: result.thumbnailUrl });
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to open Drive Picker. Check your API credentials.');
+    } finally {
+      setPickerLoading(false);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -432,7 +625,11 @@ function UploadView({ onUpload }: { onUpload: (name: string, url: string) => voi
       return;
     }
 
-    onUpload(name, transformVideoUrl(url));
+    const meta: Partial<Project> = driveFile
+      ? { fileId: driveFile.fileId, thumbnailUrl: driveFile.thumbnailUrl, sourceType: 'drive' }
+      : { sourceType: url.includes('youtube.com') || url.includes('youtu.be') ? 'youtube' : 'direct' };
+
+    onUpload(name, transformVideoUrl(url), meta);
   };
 
   return (
@@ -453,6 +650,32 @@ function UploadView({ onUpload }: { onUpload: (name: string, url: string) => voi
 
         <h2 className="text-4xl lg:text-5xl font-black italic uppercase tracking-tighter mb-2 leading-none">Create Review</h2>
         <p className="text-zinc-500 mb-8 font-medium text-sm lg:text-base">Generate a secure link for your client to leave feedback.</p>
+
+        {/* Drive Picker Button */}
+        {GAPI_CLIENT_ID && (
+          <button
+            type="button"
+            onClick={handleDrivePick}
+            disabled={pickerLoading}
+            className="w-full mb-6 flex items-center justify-center gap-3 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/30 hover:border-blue-500/60 text-blue-400 py-4 rounded-xl font-black uppercase tracking-widest text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {pickerLoading ? (
+              <RefreshCw size={18} className="animate-spin" />
+            ) : driveFile ? (
+              <CheckCircle2 size={18} className="text-green-400" />
+            ) : (
+              <Video size={18} />
+            )}
+            {pickerLoading ? 'Opening Picker...' : driveFile ? 'Drive File Selected ✓ — Change' : '📁 Pick from Google Drive'}
+          </button>
+        )}
+
+        {driveFile && (
+          <div className="mb-6 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-xs text-blue-400 font-bold uppercase tracking-widest flex items-center gap-2">
+            <CheckCircle2 size={14} />
+            Drive file auto-filled below — edit name if needed, then Generate
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-2">
@@ -791,12 +1014,14 @@ function ReviewView({
   project,
   onAddComment,
   onApprove,
-  onToggleCommentResolution
+  onToggleCommentResolution,
+  onUpdateProject
 }: {
   project: Project,
   onAddComment: (comment: Partial<Comment>) => void,
   onApprove: () => void,
-  onToggleCommentResolution: (commentId: string) => void
+  onToggleCommentResolution: (commentId: string) => void,
+  onUpdateProject: (updates: Partial<Project>) => void
 }) {
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -805,13 +1030,15 @@ function ReviewView({
   const [filter, setFilter] = useState<'all' | 'unresolved' | 'resolved'>('all');
   const [isTheaterMode, setIsTheaterMode] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [ytSyncState, setYtSyncState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
+  const [ytSyncProgress, setYtSyncProgress] = useState(0);
   const playerRef = useRef<any>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const commentsEndRef = useRef<HTMLDivElement>(null);
   const commentRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const isYouTubeEmbed = project.videoUrl.includes('youtube.com/embed/');
-  const isDriveEmbed = project.videoUrl.includes('drive.google.com');
+  const isDriveEmbed = project.videoUrl.includes('drive.google.com') || project.videoUrl.includes('docs.google.com');
   // We only use the specialized iframe logic for YouTube because it has a postMessage API.
   // Google Drive preview iframes don't, so we now force them to use ReactPlayer for control sync.
   const isEmbedVideo = isYouTubeEmbed;
@@ -1024,6 +1251,53 @@ function ReviewView({
         </div>
 
         <div className="flex items-center gap-3">
+          {/* Unlock Timeline Button for Drive videos */}
+          {project.sourceType === 'drive' && project.fileId && GAPI_CLIENT_ID && (
+            <button
+              onClick={async () => {
+                if (!confirm('This will upload the video as Unlisted to YOUR YouTube channel. Continue?')) return;
+                setYtSyncState('loading');
+                setYtSyncProgress(0);
+                try {
+                  const token = await getAccessToken(
+                    'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/drive.readonly'
+                  );
+                  const ytUrl = await uploadToDriveViaYouTube(
+                    project.fileId!,
+                    project.name,
+                    token,
+                    (pct) => setYtSyncProgress(pct)
+                  );
+                  onUpdateProject({ videoUrl: ytUrl, sourceType: 'youtube' });
+                  setYtSyncState('done');
+                  setTimeout(() => setYtSyncState('idle'), 4000);
+                } catch (err: any) {
+                  console.error('YouTube sync failed:', err);
+                  alert('YouTube sync failed: ' + err.message);
+                  setYtSyncState('error');
+                  setTimeout(() => setYtSyncState('idle'), 4000);
+                }
+              }}
+              disabled={ytSyncState === 'loading'}
+              className={cn(
+                'hidden sm:flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all border',
+                ytSyncState === 'done'
+                  ? 'bg-green-600/20 border-green-500/40 text-green-400'
+                  : ytSyncState === 'error'
+                    ? 'bg-red-600/20 border-red-500/40 text-red-400'
+                    : 'bg-blue-600/10 border-blue-500/30 text-blue-400 hover:bg-blue-600/20 hover:border-blue-500/60'
+              )}
+              title="Upload to your YouTube as Unlisted to unlock full timeline"
+            >
+              {ytSyncState === 'loading' ? (
+                <><RefreshCw size={13} className="animate-spin" /> {ytSyncProgress}%</>
+              ) : ytSyncState === 'done' ? (
+                <><CheckCircle2 size={13} /> Timeline Unlocked!</>
+              ) : (
+                <><RefreshCw size={13} /> Unlock Timeline</>
+              )}
+            </button>
+          )}
           <button
             onClick={handleShare}
             className="hidden sm:flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-zinc-700 hover:border-blue-500/50 hover:bg-blue-500/10 hover:text-blue-400 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all text-zinc-300"
