@@ -1,0 +1,5 @@
+{
+  "name": "VinReview",
+  "description": "A lightweight video review and collaboration tool for freelance video editors and their YouTube creator clients.",
+  "requestFramePermissions": ["microphone"]
+}
