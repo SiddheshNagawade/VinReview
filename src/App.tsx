@@ -8,7 +8,7 @@ import {
   Minimize, Filter, Monitor, Eye, EyeOff, Calendar, Clock, Download,
   HelpCircle, Image, Layout, List, LogOut, Moon, MoreVertical, Music,
   RefreshCw, Search, Settings, Star, User, Video, Zap, Menu, ChevronUp,
-  History, Square, Eraser, AlertTriangle
+  History, Square, Eraser
 } from 'lucide-react';
 import { nanoid } from 'nanoid';
 import { clsx, type ClassValue } from 'clsx';
@@ -444,13 +444,13 @@ function DashboardView({ projects, onDelete }: { projects: Project[], onDelete: 
       initial="hidden"
       animate="show"
       variants={container}
-      className="max-w-7xl mx-auto p-6 pt-12 lg:pt-20"
+      className="max-w-7xl mx-auto p-6 pt-6 lg:pt-10"
     >
       <header className="flex flex-col sm:flex-row items-center justify-between mb-12 gap-6">
         <motion.div variants={item} className="flex flex-col items-center sm:items-start text-center sm:text-left">
-          <h1 className="text-3xl lg:text-4xl font-black tracking-tighter italic uppercase text-transparent bg-clip-text bg-gradient-to-br from-orange-500 to-amber-600 leading-none">VinReview</h1>
+          <h1 className="text-3xl lg:text-4xl font-black tracking-tighter italic uppercase text-transparent bg-clip-text bg-gradient-to-br from-orange-500 to-amber-600 leading-[1.1] py-1 pr-4">VinReview</h1>
           <div className="text-zinc-500 text-[10px] font-bold uppercase tracking-[0.3em] mt-2 flex items-center gap-2">
-            <div className="w-6 h-[1px] bg-zinc-800" />
+            <div className="w-12 h-[2px] bg-zinc-800" />
             Video Collaboration Hub
           </div>
         </motion.div>
@@ -638,7 +638,7 @@ function UploadView({ onUpload }: { onUpload: (name: string, url: string, meta?:
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
       transition={{ duration: 0.15, ease: 'easeOut' }}
-      className="max-w-2xl mx-auto p-6 pt-12 lg:pt-24"
+      className="max-w-2xl mx-auto p-6 pt-6 lg:pt-12"
     >
       <a href="#/" className="inline-flex items-center gap-2 text-zinc-500 hover:text-orange-500 mb-12 transition-all font-bold uppercase tracking-widest text-xs group">
         <ChevronLeft size={20} className="group-hover:-translate-x-1 transition-transform" />
@@ -651,35 +651,23 @@ function UploadView({ onUpload }: { onUpload: (name: string, url: string, meta?:
         <h2 className="text-4xl lg:text-5xl font-black italic uppercase tracking-tighter mb-2 leading-none">Create Review</h2>
         <p className="text-zinc-500 mb-8 font-medium text-sm lg:text-base">Generate a secure link for your client to leave feedback.</p>
 
-        {/* Drive Picker Button (Always visible for discoverability) */}
-        <button
-          type="button"
-          onClick={handleDrivePick}
-          disabled={pickerLoading}
-          className="w-full mb-6 flex items-center justify-center gap-3 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/30 hover:border-blue-500/60 text-blue-400 py-4 rounded-xl font-black uppercase tracking-widest text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {pickerLoading ? (
-            <RefreshCw size={18} className="animate-spin" />
-          ) : driveFile ? (
-            <CheckCircle2 size={18} className="text-green-400" />
-          ) : !GAPI_CLIENT_ID ? (
-            <AlertTriangle size={18} className="text-amber-500" />
-          ) : (
-            <Video size={18} />
-          )}
-          {pickerLoading ? 'Opening Picker...' : driveFile ? 'Drive File Selected ✓ — Change' : !GAPI_CLIENT_ID ? '📁 Google Drive Setup Required' : '📁 Pick from Google Drive'}
-        </button>
-
-        {!GAPI_CLIENT_ID && (
-          <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl">
-            <p className="text-[11px] text-amber-500 font-black uppercase tracking-widest mb-1.5 flex items-center gap-2">
-              <AlertTriangle size={14} />
-              Setup Guide
-            </p>
-            <p className="text-[10px] text-zinc-400 font-medium leading-relaxed">
-              Create a <code className="text-amber-400 bg-amber-500/5 px-1 rounded">.env</code> file in your root folder and add your <code className="text-zinc-200">VITE_GOOGLE_CLIENT_ID</code> to enable this feature.
-            </p>
-          </div>
+        {/* Drive Picker Button */}
+        {GAPI_CLIENT_ID && (
+          <button
+            type="button"
+            onClick={handleDrivePick}
+            disabled={pickerLoading}
+            className="w-full mb-6 flex items-center justify-center gap-3 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/30 hover:border-blue-500/60 text-blue-400 py-4 rounded-xl font-black uppercase tracking-widest text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {pickerLoading ? (
+              <RefreshCw size={18} className="animate-spin" />
+            ) : driveFile ? (
+              <CheckCircle2 size={18} className="text-green-400" />
+            ) : (
+              <Video size={18} />
+            )}
+            {pickerLoading ? 'Opening Picker...' : driveFile ? 'Drive File Selected ✓ — Change' : '📁 Pick from Google Drive'}
+          </button>
         )}
 
         {driveFile && (
@@ -1264,14 +1252,9 @@ function ReviewView({
 
         <div className="flex items-center gap-3">
           {/* Unlock Timeline Button for Drive videos */}
-          {/* Unlock Timeline Button for Drive videos */}
-          {project.sourceType === 'drive' && project.fileId && (
+          {project.sourceType === 'drive' && project.fileId && GAPI_CLIENT_ID && (
             <button
               onClick={async () => {
-                if (!GAPI_CLIENT_ID) {
-                  alert('Google API Setup Required! Create a .env file with VITE_GOOGLE_CLIENT_ID to enable YouTube sync.');
-                  return;
-                }
                 if (!confirm('This will upload the video as Unlisted to YOUR YouTube channel. Continue?')) return;
                 setYtSyncState('loading');
                 setYtSyncProgress(0);
@@ -1297,23 +1280,19 @@ function ReviewView({
               }}
               disabled={ytSyncState === 'loading'}
               className={cn(
-                'hidden sm:flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all border outline-none',
-                !GAPI_CLIENT_ID
-                  ? 'bg-amber-600/10 border-amber-500/20 text-amber-500'
-                  : ytSyncState === 'done'
-                    ? 'bg-green-600/20 border-green-500/40 text-green-400'
-                    : ytSyncState === 'error'
-                      ? 'bg-red-600/20 border-red-500/40 text-red-400'
-                      : 'bg-blue-600/10 border-blue-500/30 text-blue-400 hover:bg-blue-600/20 hover:border-blue-500/60'
+                'hidden sm:flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all border',
+                ytSyncState === 'done'
+                  ? 'bg-green-600/20 border-green-500/40 text-green-400'
+                  : ytSyncState === 'error'
+                    ? 'bg-red-600/20 border-red-500/40 text-red-400'
+                    : 'bg-blue-600/10 border-blue-500/30 text-blue-400 hover:bg-blue-600/20 hover:border-blue-500/60'
               )}
-              title={GAPI_CLIENT_ID ? "Upload to your YouTube as Unlisted to unlock full timeline" : "Setup Required: VITE_GOOGLE_CLIENT_ID missing in .env"}
+              title="Upload to your YouTube as Unlisted to unlock full timeline"
             >
               {ytSyncState === 'loading' ? (
                 <><RefreshCw size={13} className="animate-spin" /> {ytSyncProgress}%</>
               ) : ytSyncState === 'done' ? (
                 <><CheckCircle2 size={13} /> Timeline Unlocked!</>
-              ) : !GAPI_CLIENT_ID ? (
-                <><AlertTriangle size={13} /> Setup Required</>
               ) : (
                 <><RefreshCw size={13} /> Unlock Timeline</>
               )}
