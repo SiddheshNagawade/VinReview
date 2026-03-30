@@ -539,9 +539,12 @@ function DashboardView({ projects, onDelete }: { projects: Project[], onDelete: 
         >
           <div className="absolute inset-0 bg-gradient-to-br from-orange-500/5 to-transparent opacity-50" />
           <div className="relative z-10">
-            <div className="w-24 h-24 bg-zinc-900 border border-zinc-800 rounded-full flex items-center justify-center mx-auto mb-8 shadow-2xl">
-              <Plus size={44} className="text-zinc-700" />
-            </div>
+            <a
+              href="#/upload"
+              className="w-24 h-24 bg-zinc-900 border border-zinc-800 rounded-full flex items-center justify-center mx-auto mb-8 shadow-2xl transition-all hover:scale-110 hover:border-orange-500/50 hover:bg-zinc-800 group"
+            >
+              <Plus size={44} className="text-zinc-700 group-hover:text-orange-500 transition-colors" />
+            </a>
             <h2 className="text-3xl font-black italic uppercase tracking-tight mb-3">Your desk is empty</h2>
             <p className="text-zinc-500 max-w-sm mx-auto font-medium">Create your first project to start receiving frame-accurate feedback from your team.</p>
           </div>
