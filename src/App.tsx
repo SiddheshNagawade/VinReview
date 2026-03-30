@@ -415,6 +415,8 @@ export default function App() {
 // --- Dashboard View ---
 function DashboardView({ projects, onDelete }: { projects: Project[], onDelete: (id: string) => void }) {
   const [missingIds, setMissingIds] = useState<string[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'most-comments' | 'least-comments'>('newest');
 
   // On mount: silently check if Drive files still exist
   useEffect(() => {
@@ -425,6 +427,16 @@ function DashboardView({ projects, onDelete }: { projects: Project[], onDelete: 
       if (!exists) setMissingIds(prev => [...prev, p.id]);
     });
   }, []);
+
+  const filteredAndSortedProjects = projects
+    .filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()))
+    .sort((a, b) => {
+      if (sortBy === 'newest') return b.createdAt - a.createdAt;
+      if (sortBy === 'oldest') return a.createdAt - b.createdAt;
+      if (sortBy === 'most-comments') return b.comments.length - a.comments.length;
+      if (sortBy === 'least-comments') return a.comments.length - b.comments.length;
+      return 0;
+    });
 
   const container = {
     hidden: { opacity: 0 },
@@ -466,7 +478,61 @@ function DashboardView({ projects, onDelete }: { projects: Project[], onDelete: 
         </motion.div>
       </header>
 
-      {projects.length === 0 ? (
+      {/* Search & Sort Bar */}
+      {projects.length > 0 && (
+        <motion.div
+          variants={item}
+          className="flex flex-col sm:flex-row items-center gap-4 mb-8 bg-zinc-900/20 border border-zinc-800/40 p-2 rounded-2xl backdrop-blur-md"
+        >
+          <div className="relative flex-1 w-full">
+            <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600" />
+            <input
+              type="text"
+              placeholder="Search projects..."
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              className="w-full bg-zinc-950/40 border border-transparent focus:border-orange-500/30 rounded-xl py-2.5 pl-11 pr-4 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none transition-all"
+            />
+          </div>
+          <div className="flex items-center gap-2 bg-zinc-950/40 p-1 rounded-xl border border-zinc-800/50 w-full sm:w-auto">
+            <div className="flex items-center gap-1.5 px-3 text-zinc-500">
+              <Filter size={14} />
+              <span className="text-[10px] font-black uppercase tracking-widest leading-none">Sort</span>
+            </div>
+            <select
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value as any)}
+              className="bg-transparent text-zinc-300 text-[10px] font-black uppercase tracking-widest py-1.5 pr-8 pl-1 focus:outline-none cursor-pointer appearance-none"
+              style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='currentColor'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='Length 19 9l-7 7-7-7' /%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 0.5rem center', backgroundSize: '1em' }}
+            >
+              <option value="newest" className="bg-zinc-900">Newest</option>
+              <option value="oldest" className="bg-zinc-900">Oldest</option>
+              <option value="most-comments" className="bg-zinc-900">Most Comments</option>
+              <option value="least-comments" className="bg-zinc-900">Least Comments</option>
+            </select>
+          </div>
+        </motion.div>
+      )}
+
+      {projects.length > 0 && filteredAndSortedProjects.length === 0 ? (
+        <motion.div
+          variants={item}
+          className="border border-zinc-800/50 rounded-2xl p-12 text-center bg-zinc-900/10 backdrop-blur-sm relative overflow-hidden"
+        >
+          <div className="absolute inset-0 bg-gradient-to-br from-orange-500/5 to-transparent opacity-50" />
+          <div className="relative z-10">
+            <Search size={32} className="text-zinc-700 mx-auto mb-4" />
+            <h3 className="text-xl font-black italic uppercase tracking-tight mb-2">No projects match your search</h3>
+            <p className="text-zinc-500 text-sm font-medium mb-4">Try a different search term or clear the filter.</p>
+            <button
+              onClick={() => setSearchTerm('')}
+              className="text-orange-500 text-[10px] font-black uppercase tracking-widest hover:underline px-4 py-2 bg-orange-500/10 rounded-lg border border-orange-500/20 transition-all hover:bg-orange-500 hover:text-white"
+            >
+              Clear Search
+            </button>
+          </div>
+        </motion.div>
+      ) : projects.length === 0 ? (
         <motion.div
           variants={item}
           className="border border-zinc-800/50 rounded-2xl p-24 text-center bg-zinc-900/10 backdrop-blur-sm relative overflow-hidden"
@@ -482,7 +548,7 @@ function DashboardView({ projects, onDelete }: { projects: Project[], onDelete: 
         </motion.div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {projects.map(project => {
+          {filteredAndSortedProjects.map(project => {
             const isMissing = missingIds.includes(project.id);
             const thumb = project.thumbnailUrl || getThumbnailUrl(project.videoUrl);
             return (
