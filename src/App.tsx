@@ -8,7 +8,7 @@ import {
   Minimize, Filter, Monitor, Eye, EyeOff, Calendar, Clock, Download,
   HelpCircle, Image, Layout, List, LogOut, Moon, MoreVertical, Music,
   RefreshCw, Search, Settings, Star, User, Video, Zap, Menu, ChevronUp,
-  History, Square, Eraser
+  History, Square, Eraser, ZoomIn
 } from 'lucide-react';
 import { nanoid } from 'nanoid';
 import { clsx, type ClassValue } from 'clsx';
@@ -379,7 +379,7 @@ export default function App() {
   const activeProject = projects.find(p => p.id === activeProjectId);
 
   return (
-    <div className="min-h-screen bg-[#0A0A0A] text-white font-sans selection:bg-orange-500/30">
+    <div className="h-screen w-screen overflow-hidden bg-[#0A0A0A] text-white font-sans selection:bg-orange-500/30 flex flex-col">
       <AnimatePresence mode="wait">
         {currentView === 'dashboard' && (
           <DashboardView
@@ -456,7 +456,7 @@ function DashboardView({ projects, onDelete }: { projects: Project[], onDelete: 
       initial="hidden"
       animate="show"
       variants={container}
-      className="max-w-7xl mx-auto p-6 pt-6 lg:pt-10"
+      className="h-full flex flex-col max-w-7xl mx-auto w-full p-6 pt-6 lg:pt-10 overflow-hidden"
     >
       <header className="flex flex-col sm:flex-row items-center justify-between mb-12 gap-6">
         <motion.div variants={item} className="flex flex-col items-center sm:items-start text-center sm:text-left">
@@ -514,135 +514,137 @@ function DashboardView({ projects, onDelete }: { projects: Project[], onDelete: 
         </motion.div>
       )}
 
-      {projects.length > 0 && filteredAndSortedProjects.length === 0 ? (
-        <motion.div
-          variants={item}
-          className="border border-zinc-800/50 rounded-2xl p-12 text-center bg-zinc-900/10 backdrop-blur-sm relative overflow-hidden"
-        >
-          <div className="absolute inset-0 bg-gradient-to-br from-orange-500/5 to-transparent opacity-50" />
-          <div className="relative z-10">
-            <Search size={32} className="text-zinc-700 mx-auto mb-4" />
-            <h3 className="text-xl font-black italic uppercase tracking-tight mb-2">No projects match your search</h3>
-            <p className="text-zinc-500 text-sm font-medium mb-4">Try a different search term or clear the filter.</p>
-            <button
-              onClick={() => setSearchTerm('')}
-              className="text-orange-500 text-[10px] font-black uppercase tracking-widest hover:underline px-4 py-2 bg-orange-500/10 rounded-lg border border-orange-500/20 transition-all hover:bg-orange-500 hover:text-white"
-            >
-              Clear Search
-            </button>
-          </div>
-        </motion.div>
-      ) : projects.length === 0 ? (
-        <motion.div
-          variants={item}
-          className="border border-zinc-800/50 rounded-2xl p-24 text-center bg-zinc-900/10 backdrop-blur-sm relative overflow-hidden"
-        >
-          <div className="absolute inset-0 bg-gradient-to-br from-orange-500/5 to-transparent opacity-50" />
-          <div className="relative z-10">
-            <a
-              href="#/upload"
-              className="w-24 h-24 bg-zinc-900 border border-zinc-800 rounded-full flex items-center justify-center mx-auto mb-8 shadow-2xl transition-all hover:scale-110 hover:border-orange-500/50 hover:bg-zinc-800 group"
-            >
-              <Plus size={44} className="text-zinc-700 group-hover:text-orange-500 transition-colors" />
-            </a>
-            <h2 className="text-3xl font-black italic uppercase tracking-tight mb-3">Your desk is empty</h2>
-            <p className="text-zinc-500 max-w-sm mx-auto font-medium">Create your first project to start receiving frame-accurate feedback from your team.</p>
-          </div>
-        </motion.div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredAndSortedProjects.map(project => {
-            const isMissing = missingIds.includes(project.id);
-            const thumb = project.thumbnailUrl || getThumbnailUrl(project.videoUrl);
-            return (
-              <motion.div
-                key={project.id}
-                variants={item}
-                whileHover={{ y: -3, transition: { duration: 0.1 } }}
-                className="group bg-zinc-900/40 border border-zinc-800/50 p-4 rounded-2xl flex flex-col justify-between gap-4 transition-colors hover:border-orange-500/30 hover:bg-zinc-900/60 relative overflow-hidden"
+      <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar pb-10">
+        {projects.length > 0 && filteredAndSortedProjects.length === 0 ? (
+          <motion.div
+            variants={item}
+            className="border border-zinc-800/50 rounded-2xl p-12 text-center bg-zinc-900/10 backdrop-blur-sm relative overflow-hidden"
+          >
+            <div className="absolute inset-0 bg-gradient-to-br from-orange-500/5 to-transparent opacity-50" />
+            <div className="relative z-10">
+              <Search size={32} className="text-zinc-700 mx-auto mb-4" />
+              <h3 className="text-xl font-black italic uppercase tracking-tight mb-2">No projects match your search</h3>
+              <p className="text-zinc-500 text-sm font-medium mb-4">Try a different search term or clear the filter.</p>
+              <button
+                onClick={() => setSearchTerm('')}
+                className="text-orange-500 text-[10px] font-black uppercase tracking-widest hover:underline px-4 py-2 bg-orange-500/10 rounded-lg border border-orange-500/20 transition-all hover:bg-orange-500 hover:text-white"
               >
-                {project.isApproved && (
-                  <div className="absolute top-0 right-0 bg-green-600 text-white text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-bl-lg flex items-center gap-1">
-                    <Check size={10} strokeWidth={4} />
-                    Approved
-                  </div>
-                )}
+                Clear Search
+              </button>
+            </div>
+          </motion.div>
+        ) : projects.length === 0 ? (
+          <motion.div
+            variants={item}
+            className="border border-zinc-800/50 rounded-2xl p-24 text-center bg-zinc-900/10 backdrop-blur-sm relative overflow-hidden"
+          >
+            <div className="absolute inset-0 bg-gradient-to-br from-orange-500/5 to-transparent opacity-50" />
+            <div className="relative z-10">
+              <a
+                href="#/upload"
+                className="w-24 h-24 bg-zinc-900 border border-zinc-800 rounded-full flex items-center justify-center mx-auto mb-8 shadow-2xl transition-all hover:scale-110 hover:border-orange-500/50 hover:bg-zinc-800 group"
+              >
+                <Plus size={44} className="text-zinc-700 group-hover:text-orange-500 transition-colors" />
+              </a>
+              <h2 className="text-3xl font-black italic uppercase tracking-tight mb-3">Your desk is empty</h2>
+              <p className="text-zinc-500 max-w-sm mx-auto font-medium">Create your first project to start receiving frame-accurate feedback from your team.</p>
+            </div>
+          </motion.div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredAndSortedProjects.map(project => {
+              const isMissing = missingIds.includes(project.id);
+              const thumb = project.thumbnailUrl || getThumbnailUrl(project.videoUrl);
+              return (
+                <motion.div
+                  key={project.id}
+                  variants={item}
+                  whileHover={{ y: -3, transition: { duration: 0.1 } }}
+                  className="group bg-zinc-900/40 border border-zinc-800/50 p-4 rounded-2xl flex flex-col justify-between gap-4 transition-colors hover:border-orange-500/30 hover:bg-zinc-900/60 relative overflow-hidden"
+                >
+                  {project.isApproved && (
+                    <div className="absolute top-0 right-0 bg-green-600 text-white text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-bl-lg flex items-center gap-1">
+                      <Check size={10} strokeWidth={4} />
+                      Approved
+                    </div>
+                  )}
 
-                <div>
-                  <div className="w-full aspect-video bg-zinc-950 rounded-lg mb-3 overflow-hidden border border-zinc-800/50 group-hover:border-orange-500/20 transition-colors relative">
-                    {thumb ? (
-                      <>
-                        <img
-                          src={thumb}
-                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500 opacity-60 group-hover:opacity-100"
-                          alt={project.name}
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
-                      </>
-                    ) : (
-                      <div className="w-full h-full bg-gradient-to-br from-zinc-800 to-zinc-950 flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
-                        <Play size={28} className="text-zinc-700 group-hover:text-orange-500/50 transition-colors" />
-                      </div>
-                    )}
-                    {/* Source Missing Overlay */}
-                    {isMissing && (
-                      <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center gap-2 backdrop-blur-sm">
-                        <XCircle size={28} className="text-red-400" />
-                        <span className="text-[10px] font-black uppercase tracking-widest text-red-400">Source Missing</span>
-                        <span className="text-[9px] text-zinc-500 text-center px-4">The Drive file was deleted or moved. Thumbnail cached.</span>
-                      </div>
-                    )}
-                    {!isMissing && (
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <div className="w-12 h-12 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 group-hover:scale-110 group-hover:bg-orange-500 group-hover:border-orange-400 transition-all">
-                          <Play size={20} className="text-white fill-white ml-1" />
+                  <div>
+                    <div className="w-full aspect-video bg-zinc-950 rounded-lg mb-3 overflow-hidden border border-zinc-800/50 group-hover:border-orange-500/20 transition-colors relative">
+                      {thumb ? (
+                        <>
+                          <img
+                            src={thumb}
+                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500 opacity-60 group-hover:opacity-100"
+                            alt={project.name}
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                        </>
+                      ) : (
+                        <div className="w-full h-full bg-gradient-to-br from-zinc-800 to-zinc-950 flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
+                          <Play size={28} className="text-zinc-700 group-hover:text-orange-500/50 transition-colors" />
                         </div>
-                      </div>
-                    )}
+                      )}
+                      {/* Source Missing Overlay */}
+                      {isMissing && (
+                        <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center gap-2 backdrop-blur-sm">
+                          <XCircle size={28} className="text-red-400" />
+                          <span className="text-[10px] font-black uppercase tracking-widest text-red-400">Source Missing</span>
+                          <span className="text-[9px] text-zinc-500 text-center px-4">The Drive file was deleted or moved. Thumbnail cached.</span>
+                        </div>
+                      )}
+                      {!isMissing && (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <div className="w-12 h-12 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 group-hover:scale-110 group-hover:bg-orange-500 group-hover:border-orange-400 transition-all">
+                            <Play size={20} className="text-white fill-white ml-1" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <h3 className="text-base font-black italic uppercase tracking-tighter group-hover:text-orange-500 transition-colors line-clamp-1">
+                      {project.name}
+                    </h3>
+                    <p className="text-[9px] text-zinc-600 font-bold uppercase tracking-widest mt-0.5">
+                      {project.comments.length} comments · {new Date(project.createdAt).toLocaleDateString()}
+                      {project.sourceType === 'drive' && <span className="ml-2 text-blue-500">· Drive</span>}
+                      {project.sourceType === 'youtube' && <span className="ml-2 text-red-500">· YouTube</span>}
+                    </p>
                   </div>
-                  <h3 className="text-base font-black italic uppercase tracking-tighter group-hover:text-orange-500 transition-colors line-clamp-1">
-                    {project.name}
-                  </h3>
-                  <p className="text-[9px] text-zinc-600 font-bold uppercase tracking-widest mt-0.5">
-                    {project.comments.length} comments · {new Date(project.createdAt).toLocaleDateString()}
-                    {project.sourceType === 'drive' && <span className="ml-2 text-blue-500">· Drive</span>}
-                    {project.sourceType === 'youtube' && <span className="ml-2 text-red-500">· YouTube</span>}
-                  </p>
-                </div>
 
-                <div className="flex items-center gap-2 pt-3 border-t border-zinc-800/30">
-                  <a
-                    href={`#/review/${project.id}`}
-                    className="flex-1 bg-zinc-900 border border-zinc-700 hover:border-orange-500/50 hover:bg-orange-500/10 hover:text-orange-400 text-zinc-200 py-2.5 rounded-lg font-black italic uppercase tracking-tighter text-[10px] text-center transition-all flex items-center justify-center gap-1.5"
-                  >
-                    <ExternalLink size={13} />
-                    Open Review
-                  </a>
-                  <button
-                    onClick={() => {
-                      const url = `${window.location.origin}${window.location.pathname}#/review/${project.id}`;
-                      navigator.clipboard.writeText(url).then(() => alert('Link copied!')).catch(() => alert('Link copied!'));
-                    }}
-                    className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-700 hover:border-blue-500/50 hover:bg-blue-500/10 hover:text-blue-400 transition-all text-zinc-400"
-                    title="Copy Link"
-                  >
-                    <Share2 size={15} />
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (confirm('Delete this project?')) onDelete(project.id);
-                    }}
-                    className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-700 hover:border-red-500/50 hover:bg-red-500/10 hover:text-red-400 transition-all text-zinc-400"
-                    title="Delete"
-                  >
-                    <Trash2 size={15} />
-                  </button>
-                </div>
-              </motion.div>
-            );
-          })}
-        </div>
-      )}
+                  <div className="flex items-center gap-2 pt-3 border-t border-zinc-800/30">
+                    <a
+                      href={`#/review/${project.id}`}
+                      className="flex-1 bg-zinc-900 border border-zinc-700 hover:border-orange-500/50 hover:bg-orange-500/10 hover:text-orange-400 text-zinc-200 py-2.5 rounded-lg font-black italic uppercase tracking-tighter text-[10px] text-center transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <ExternalLink size={13} />
+                      Open Review
+                    </a>
+                    <button
+                      onClick={() => {
+                        const url = `${window.location.origin}${window.location.pathname}#/review/${project.id}`;
+                        navigator.clipboard.writeText(url).then(() => alert('Link copied!')).catch(() => alert('Link copied!'));
+                      }}
+                      className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-700 hover:border-blue-500/50 hover:bg-blue-500/10 hover:text-blue-400 transition-all text-zinc-400"
+                      title="Copy Link"
+                    >
+                      <Share2 size={15} />
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (confirm('Delete this project?')) onDelete(project.id);
+                      }}
+                      className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-700 hover:border-red-500/50 hover:bg-red-500/10 hover:text-red-400 transition-all text-zinc-400"
+                      title="Delete"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </motion.div>
   );
 }
@@ -707,7 +709,7 @@ function UploadView({ onUpload }: { onUpload: (name: string, url: string, meta?:
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
       transition={{ duration: 0.15, ease: 'easeOut' }}
-      className="max-w-2xl mx-auto p-6 pt-6 lg:pt-12"
+      className="h-full flex flex-col max-w-2xl mx-auto w-full p-6 pt-6 lg:pt-12 overflow-y-auto overflow-x-hidden custom-scrollbar"
     >
       <a href="#/" className="inline-flex items-center gap-2 text-zinc-500 hover:text-orange-500 mb-12 transition-all font-bold uppercase tracking-widest text-xs group">
         <ChevronLeft size={20} className="group-hover:-translate-x-1 transition-transform" />
@@ -1123,6 +1125,8 @@ function ReviewView({
   const [showDrawingMode, setShowDrawingMode] = useState(false);
   const [showAudioMode, setShowAudioMode] = useState(false);
   const [activeComposerTab, setActiveComposerTab] = useState<'text' | 'audio' | 'drawing'>('text');
+  const [timelineZoom, setTimelineZoom] = useState(1);
+  const timelineContainerRef = useRef<HTMLDivElement>(null);
 
   const toggleFullScreen = () => {
     if (!document.fullscreenElement) {
@@ -1257,14 +1261,17 @@ function ReviewView({
   };
 
   const handleTimelineInteraction = (e: React.MouseEvent | React.TouchEvent) => {
-    const rect = e.currentTarget.getBoundingClientRect();
+    if (!timelineContainerRef.current) return;
+    const rect = timelineContainerRef.current.getBoundingClientRect();
     const clientX = 'touches' in e ? (e as React.TouchEvent).touches[0].clientX : (e as React.MouseEvent).clientX;
+    const scrollLeft = timelineContainerRef.current.parentElement?.scrollLeft || 0;
     const x = clientX - rect.left;
     const percent = Math.max(0, Math.min(1, x / rect.width));
     const rawTime = percent * duration;
 
-    // Snap to nearest visible comment dot within 2% of timeline
-    const snapThreshold = duration * 0.02;
+    // Snap to nearest visible comment dot within 2% of visible range (not total duration)
+    const visibleDuration = duration / timelineZoom;
+    const snapThreshold = visibleDuration * 0.02;
     const visibleComments = project.comments.filter(c => {
       if (filter === 'unresolved') return !c.resolved;
       if (filter === 'resolved') return c.resolved;
@@ -1304,9 +1311,16 @@ function ReviewView({
       className={cn(
         "flex flex-col h-screen w-full relative overflow-hidden bg-[#050505]",
         "lg:flex-row",
-        isFullscreen && "p-0"
+        isFullscreen && "p-0",
+        showDrawingMode && "drawing-mode-active"
       )}
     >
+      <style>{`
+        .drawing-mode-active header { transform: translateY(-100%); opacity: 0; pointer-events: none; }
+        .drawing-mode-active aside { transform: translateX(100%); opacity: 0; pointer-events: none; width: 0 !important; min-width: 0 !important; }
+        .drawing-mode-active .fixed.lg\\:hidden { opacity: 0.2; pointer-events: none; }
+        header, aside { transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+      `}</style>
       {/* Header Bar */}
       <header className="absolute top-0 left-0 right-0 h-16 bg-zinc-950/50 backdrop-blur-xl border-b border-white/5 z-50 flex items-center justify-between px-6">
         <div className="flex items-center gap-4">
@@ -1557,80 +1571,111 @@ function ReviewView({
                 {playing ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="ml-1" />}
               </button>
 
-              <div className="flex-1 group">
-                <div className="flex justify-between mb-1.5 px-0.5">
-                  <span className="text-[10px] font-bold text-orange-500 tracking-wider font-mono">
-                    {formatTime(currentTime)}
-                  </span>
-                  <span className="text-[10px] font-bold text-zinc-600 tracking-wider font-mono">
-                    {formatTime(duration)}
-                  </span>
-                </div>
-                <div
-                  className="relative h-2 bg-zinc-900 rounded-full cursor-pointer"
-                  onMouseDown={handleTimelineInteraction}
-                >
-                  <motion.div
-                    className="absolute left-0 top-0 h-full bg-gradient-to-r from-orange-600 to-orange-400 rounded-full z-10"
-                    style={{ width: `${(currentTime / duration) * 100}%` }}
-                  />
-                  {/* Vertical Playhead Line */}
-                  <motion.div
-                    className="absolute top-[-4px] bottom-[-4px] w-1 bg-white shadow-[0_0_10px_rgba(255,255,255,0.5)] z-30 rounded-full"
-                    style={{ left: `${(currentTime / duration) * 100}%` }}
-                  />
-                  {filteredComments.map(c => {
-                    const dotColor = c.resolved
-                      ? 'bg-zinc-600'
-                      : c.type === 'audio'
-                        ? 'bg-blue-500 shadow-[0_0_6px_rgba(59,130,246,0.6)]'
-                        : c.type === 'drawing'
-                          ? 'bg-purple-500 shadow-[0_0_6px_rgba(168,85,247,0.6)]'
-                          : 'bg-orange-500 shadow-[0_0_6px_rgba(249,115,22,0.5)]';
-                    const tooltipText = c.type === 'text'
-                      ? (c.text?.slice(0, 40) ?? '') + (c.text && c.text.length > 40 ? '…' : '')
-                      : c.type === 'audio' ? '🎙 Voice comment'
-                        : '✏️ Drawing markup';
-                    return (
-                      <div
-                        key={c.id}
-                        className="absolute top-1/2 -translate-y-1/2 z-20 cursor-pointer"
-                        style={{ left: `${(c.timestamp / duration) * 100}%` }}
-                        onClick={(e) => { e.stopPropagation(); seekToComment(c); }}
-                        onMouseEnter={() => setHoveredComment(c.id)}
-                        onMouseLeave={() => setHoveredComment(null)}
-                      >
-                        <div className={cn(
-                          "w-2.5 h-2.5 rounded-full border border-black transition-all hover:scale-150",
-                          dotColor
-                        )} />
-                        {hoveredComment === c.id && (
-                          <div
-                            className="absolute bottom-5 left-1/2 -translate-x-1/2 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 shadow-2xl z-50 min-w-[140px] max-w-[220px]"
-                            onMouseEnter={() => setHoveredComment(c.id)}
-                            onMouseLeave={() => setHoveredComment(null)}
-                          >
-                            <p className={cn(
-                              "text-[10px] font-bold uppercase tracking-widest mb-1",
-                              c.type === 'audio' ? 'text-blue-400' : c.type === 'drawing' ? 'text-purple-400' : 'text-orange-400'
-                            )}>
-                              {c.type} · {formatTime(c.timestamp)}
-                            </p>
-                            <p className="text-[11px] text-zinc-300 font-medium leading-snug mb-2">{tooltipText}</p>
-                            {c.type === 'audio' && c.audioUrl && (
-                              <audio src={c.audioUrl} controls className="w-full h-10 opacity-80" preload="metadata" />
-                            )}
-                            <button
-                              onClick={(e) => { e.stopPropagation(); scrollToComment(c.id); }}
-                              className="mt-1.5 text-[9px] font-black uppercase tracking-widest text-zinc-500 hover:text-white transition-colors"
-                            >
-                              Jump to comment ↓
-                            </button>
-                          </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex justify-between items-center mb-1.5 px-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-orange-500 tracking-wider font-mono">
+                      {formatTime(currentTime)}
+                    </span>
+                    <span className="text-[10px] text-zinc-600">/</span>
+                    <span className="text-[10px] font-bold text-zinc-600 tracking-wider font-mono">
+                      {formatTime(duration)}
+                    </span>
+                  </div>
+
+                  {/* Zoom Controls */}
+                  <div className="flex items-center gap-1 bg-zinc-900/50 rounded-lg p-0.5 border border-white/5">
+                    {[1, 2, 5].map((z) => (
+                      <button
+                        key={z}
+                        onClick={() => setTimelineZoom(z)}
+                        className={cn(
+                          "px-1.5 py-0.5 rounded text-[8px] font-black transition-all",
+                          timelineZoom === z
+                            ? "bg-orange-500 text-white"
+                            : "text-zinc-500 hover:text-zinc-300"
                         )}
-                      </div>
-                    );
-                  })}
+                      >
+                        {z}x
+                      </button>
+                    ))}
+                    <ZoomIn size={10} className="ml-1 mr-0.5 text-zinc-600" />
+                  </div>
+                </div>
+
+                <div
+                  className="relative h-6 flex items-center overflow-x-auto overflow-y-hidden custom-scrollbar touch-pan-x"
+                >
+                  <div
+                    ref={timelineContainerRef}
+                    className="relative h-2 bg-zinc-900 rounded-full cursor-pointer flex-shrink-0"
+                    style={{ width: `${timelineZoom * 100}%` }}
+                    onMouseDown={handleTimelineInteraction}
+                    onTouchStart={handleTimelineInteraction}
+                    onTouchMove={handleTimelineInteraction}
+                  >
+                    <motion.div
+                      className="absolute left-0 top-0 h-full bg-gradient-to-r from-orange-600 to-orange-400 rounded-full z-10"
+                      style={{ width: `${(currentTime / duration) * 100}%` }}
+                    />
+                    {/* Vertical Playhead Line */}
+                    <motion.div
+                      className="absolute top-[-8px] bottom-[-8px] w-1 bg-white shadow-[0_0_10px_rgba(255,255,255,0.5)] z-30 rounded-full"
+                      style={{ left: `${(currentTime / duration) * 100}%` }}
+                    />
+                    {filteredComments.map(c => {
+                      const dotColor = c.resolved
+                        ? 'bg-zinc-600'
+                        : c.type === 'audio'
+                          ? 'bg-blue-500 shadow-[0_0_6px_rgba(59,130,246,0.6)]'
+                          : c.type === 'drawing'
+                            ? 'bg-purple-500 shadow-[0_0_6px_rgba(168,85,247,0.6)]'
+                            : 'bg-orange-500 shadow-[0_0_6px_rgba(249,115,22,0.5)]';
+                      const tooltipText = c.type === 'text'
+                        ? (c.text?.slice(0, 40) ?? '') + (c.text && c.text.length > 40 ? '…' : '')
+                        : c.type === 'audio' ? '🎙 Voice comment'
+                          : '✏️ Drawing markup';
+                      return (
+                        <div
+                          key={c.id}
+                          className="absolute top-1/2 -translate-y-1/2 z-20 cursor-pointer"
+                          style={{ left: `${(c.timestamp / duration) * 100}%` }}
+                          onClick={(e) => { e.stopPropagation(); seekToComment(c); }}
+                          onMouseEnter={() => setHoveredComment(c.id)}
+                          onMouseLeave={() => setHoveredComment(null)}
+                        >
+                          <div className={cn(
+                            "w-2.5 h-2.5 rounded-full border border-black transition-all hover:scale-150",
+                            dotColor
+                          )} />
+                          {hoveredComment === c.id && (
+                            <div
+                              className="absolute bottom-5 left-1/2 -translate-x-1/2 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 shadow-2xl z-50 min-w-[140px] max-w-[220px]"
+                              onMouseEnter={() => setHoveredComment(c.id)}
+                              onMouseLeave={() => setHoveredComment(null)}
+                            >
+                              <p className={cn(
+                                "text-[10px] font-bold uppercase tracking-widest mb-1",
+                                c.type === 'audio' ? 'text-blue-400' : c.type === 'drawing' ? 'text-purple-400' : 'text-orange-400'
+                              )}>
+                                {c.type} · {formatTime(c.timestamp)}
+                              </p>
+                              <p className="text-[11px] text-zinc-300 font-medium leading-snug mb-2">{tooltipText}</p>
+                              {c.type === 'audio' && c.audioUrl && (
+                                <audio src={c.audioUrl} controls className="w-full h-10 opacity-80" preload="metadata" />
+                              )}
+                              <button
+                                onClick={(e) => { e.stopPropagation(); scrollToComment(c.id); }}
+                                className="mt-1.5 text-[9px] font-black uppercase tracking-widest text-zinc-500 hover:text-white transition-colors"
+                              >
+                                Jump to comment ↓
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 
