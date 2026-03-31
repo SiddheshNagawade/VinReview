@@ -13,6 +13,7 @@ import {
 import { nanoid } from 'nanoid';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { getProjects, saveProjects, clearLocalStorage } from './db';
 
 // --- Utilities ---
 function cn(...inputs: ClassValue[]) {
@@ -269,18 +270,52 @@ async function uploadToDriveViaYouTube(
 // --- /Google API Utilities ---
 
 export default function App() {
-  const [projects, setProjects] = useState<Project[]>(() => {
-    const saved = localStorage.getItem('vinreview_projects');
-    return saved ? JSON.parse(saved) : [];
-  });
-
+  const [projects, setProjects] = useState<Project[]>([]);
   const [currentView, setCurrentView] = useState<'dashboard' | 'upload' | 'review'>('dashboard');
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
 
-  // Persistence
+  // Persistence & Migration
   useEffect(() => {
-    localStorage.setItem('vinreview_projects', JSON.stringify(projects));
-  }, [projects]);
+    const init = async () => {
+      const savedInDB = await getProjects();
+      const savedInLocal = localStorage.getItem('vinreview_projects');
+
+      if (savedInLocal && savedInDB.length === 0) {
+        // Migration: move from localStorage to IndexedDB
+        try {
+          const migrated = JSON.parse(savedInLocal);
+          // Auto-clean: Remove ANY project older than 7 days during migration
+          const filtered = migrated.filter((p: Project) => {
+            const isOld = Date.now() - p.createdAt > 1000 * 60 * 60 * 24 * 7; // 7 days
+            return !isOld;
+          });
+          setProjects(filtered);
+          await saveProjects(filtered);
+          clearLocalStorage();
+          console.log('Migration and initial clean successful');
+        } catch (err) {
+          console.error('Migration failed', err);
+        }
+      } else {
+        // Daily house-keeping on existing IndexedDB data
+        // Remove ANY project older than 7 days to keep storage lean
+        const healthy = savedInDB.filter((p: Project) => {
+          const isOld = Date.now() - p.createdAt > 1000 * 60 * 60 * 24 * 7; // 7 days
+          return !isOld;
+        });
+        setProjects(healthy);
+      }
+      setIsInitialLoading(false);
+    };
+    init();
+  }, []);
+
+  useEffect(() => {
+    if (!isInitialLoading) {
+      saveProjects(projects);
+    }
+  }, [projects, isInitialLoading]);
 
   // Hash-based routing
   useEffect(() => {
@@ -381,31 +416,40 @@ export default function App() {
   return (
     <div className="h-screen w-screen overflow-hidden bg-[#0A0A0A] text-white font-sans selection:bg-orange-500/30 flex flex-col">
       <AnimatePresence mode="wait">
-        {currentView === 'dashboard' && (
-          <DashboardView
-            key="dashboard"
-            projects={projects}
-            onDelete={deleteProject}
-          />
-        )}
-        {currentView === 'upload' && (
-          <UploadView key="upload" onUpload={addProject} />
-        )}
-        {currentView === 'review' && activeProject && (
-          <ReviewView
-            key={`review-${activeProject.id}`}
-            project={activeProject}
-            onAddComment={(comment) => addComment(activeProject.id, comment)}
-            onApprove={() => toggleApproval(activeProject.id)}
-            onToggleCommentResolution={(commentId) => toggleCommentResolution(activeProject.id, commentId)}
-            onUpdateProject={(updates) => setProjects(prev => prev.map(p => p.id === activeProject.id ? { ...p, ...updates } : p))}
-          />
-        )}
-        {currentView === 'review' && !activeProject && (
-          <div key="not-found" className="flex flex-col items-center justify-center h-screen p-6 text-center">
-            <h2 className="text-2xl font-bold mb-4">Project Not Found</h2>
-            <a href="#/" className="bg-white text-black px-6 py-3 rounded-full font-bold">Back to Dashboard</a>
+        {isInitialLoading ? (
+          <div className="flex flex-col items-center justify-center h-screen space-y-4">
+            <RefreshCw size={40} className="animate-spin text-orange-500" />
+            <p className="text-zinc-500 font-bold uppercase tracking-widest text-xs">Loading Workstation...</p>
           </div>
+        ) : (
+          <>
+            {currentView === 'dashboard' && (
+              <DashboardView
+                key="dashboard"
+                projects={projects}
+                onDelete={deleteProject}
+              />
+            )}
+            {currentView === 'upload' && (
+              <UploadView key="upload" onUpload={addProject} />
+            )}
+            {currentView === 'review' && activeProject && (
+              <ReviewView
+                key={`review-${activeProject.id}`}
+                project={activeProject}
+                onAddComment={(comment) => addComment(activeProject.id, comment)}
+                onApprove={() => toggleApproval(activeProject.id)}
+                onToggleCommentResolution={(commentId) => toggleCommentResolution(activeProject.id, commentId)}
+                onUpdateProject={(updates) => setProjects(prev => prev.map(p => p.id === activeProject.id ? { ...p, ...updates } : p))}
+              />
+            )}
+            {currentView === 'review' && !activeProject && (
+              <div key="not-found" className="flex flex-col items-center justify-center h-screen p-6 text-center">
+                <h2 className="text-2xl font-bold mb-4">Project Not Found</h2>
+                <a href="#/" className="bg-white text-black px-6 py-3 rounded-full font-bold">Back to Dashboard</a>
+              </div>
+            )}
+          </>
         )}
       </AnimatePresence>
     </div>
@@ -418,14 +462,21 @@ function DashboardView({ projects, onDelete }: { projects: Project[], onDelete: 
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'most-comments' | 'least-comments'>('newest');
 
-  // On mount: silently check if Drive files still exist
+  // On mount: silently check if Drive files still exist (Throttled)
   useEffect(() => {
     const driveProjects = projects.filter(p => p.fileId);
     if (!driveProjects.length) return;
-    driveProjects.forEach(async (p) => {
-      const exists = await checkDriveFileExists(p.fileId!);
-      if (!exists) setMissingIds(prev => [...prev, p.id]);
-    });
+
+    // Run health checks with a small sequential delay to avoid hitting rate limits or blocking the UI
+    const runChecks = async () => {
+      for (const p of driveProjects) {
+        const exists = await checkDriveFileExists(p.fileId!);
+        if (!exists) setMissingIds(prev => [...prev, p.id]);
+        // Wait 100ms between checks
+        await new Promise(r => setTimeout(r, 100));
+      }
+    };
+    runChecks();
   }, []);
 
   const filteredAndSortedProjects = projects
@@ -907,7 +958,20 @@ function DrawingOverlay({
     if (!isDrawing) return;
     setIsDrawing(false);
     if (currentPoints.length > 1) {
-      const newPath: DrawingPath = { points: currentPoints, color: COLOR, width: WIDTH };
+      // Simplify path: skip points that are too close to reduce data size
+      const simplified = [currentPoints[0]];
+      let lastPoint = currentPoints[0];
+      for (let i = 1; i < currentPoints.length - 1; i++) {
+        const p = currentPoints[i];
+        const dist = Math.hypot(p.x - lastPoint.x, p.y - lastPoint.y);
+        if (dist > 0.003) { // Threshold: 0.3% of canvas dimensions
+          simplified.push(p);
+          lastPoint = p;
+        }
+      }
+      simplified.push(currentPoints[currentPoints.length - 1]);
+
+      const newPath: DrawingPath = { points: simplified, color: COLOR, width: WIDTH };
       const newPaths = [...paths, newPath];
       setPaths(newPaths);
       setCurrentPoints([]);
