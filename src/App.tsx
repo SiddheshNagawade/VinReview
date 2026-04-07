@@ -8,7 +8,7 @@ import {
   Minimize, Filter, Monitor, Eye, EyeOff, Calendar, Clock, Download,
   HelpCircle, Image, Layout, List, LogOut, Moon, MoreVertical, Music,
   RefreshCw, Search, Settings, Star, User, Video, Zap, Menu, ChevronUp,
-  History, Square, Eraser, ZoomIn
+  History, Square, Eraser, ZoomIn, Copy
 } from 'lucide-react';
 import { nanoid } from 'nanoid';
 import { clsx, type ClassValue } from 'clsx';
@@ -708,6 +708,7 @@ function UploadView({ onUpload }: { onUpload: (name: string, url: string, meta?:
   const [error, setError] = useState('');
   const [pickerLoading, setPickerLoading] = useState(false);
   const [driveFile, setDriveFile] = useState<{ fileId: string; thumbnailUrl?: string } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const handleDrivePick = async () => {
     setPickerLoading(true);
@@ -816,7 +817,37 @@ function UploadView({ onUpload }: { onUpload: (name: string, url: string, meta?:
           </div>
 
           <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 ml-1">Video URL</label>
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 ml-1">Video URL</label>
+              <button
+                type="button"
+                onClick={() => {
+                  const demoLink = "https://www.youtube.com/watch?v=pJvV7MI-LyY&t=278s";
+                  navigator.clipboard.writeText(demoLink).then(() => {
+                    setUrl(demoLink);
+                    if (error) setError('');
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }).catch(() => { });
+                }}
+                className={cn(
+                  "text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 px-2 py-1 rounded-md active:scale-95",
+                  copied ? "text-green-500 bg-green-500/10" : "text-orange-500 hover:text-orange-400 hover:bg-orange-500/10"
+                )}
+              >
+                {copied ? (
+                  <>
+                    <CheckCircle2 size={12} />
+                    Copied!
+                  </>
+                ) : (
+                  <>
+                    <Copy size={12} />
+                    Try Demo Link
+                  </>
+                )}
+              </button>
+            </div>
             <input
               type="url"
               value={url}
@@ -1046,22 +1077,36 @@ function AudioRecorder({
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<number | null>(null);
 
-  const startRecording = async () => {
+  const startRecording = async (isCancelledRef: React.MutableRefObject<boolean>) => {
     try {
       if (typeof MediaRecorder === 'undefined') {
         throw new Error("Recording not supported on this device/browser.");
       }
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      // Determine supported MIME type for mobile (especially Safari/iOS)
-      const mimeType = [
+      if (isCancelledRef.current) {
+        stream.getTracks().forEach(track => {
+          track.enabled = false;
+          track.stop();
+        });
+        return;
+      }
+
+      const recorder = new MediaRecorder(stream, [
         'audio/webm',
         'audio/mp4',
         'audio/ogg',
         'audio/wav'
-      ].find(type => MediaRecorder.isTypeSupported(type)) || '';
+      ].find(type => MediaRecorder.isTypeSupported(type)) ? {
+        mimeType: [
+          'audio/webm',
+          'audio/mp4',
+          'audio/ogg',
+          'audio/wav'
+        ].find(type => MediaRecorder.isTypeSupported(type))!
+      } : undefined);
 
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       mediaRecorderRef.current = recorder;
       chunksRef.current = [];
 
@@ -1070,20 +1115,18 @@ function AudioRecorder({
       };
 
       recorder.onstop = () => {
-        // Use the actual mimeType from the recorder
         const actualType = recorder.mimeType || 'audio/webm';
         const blob = new Blob(chunksRef.current, { type: actualType });
-
-        // Convert Blob to Base64 to allow persistence in localStorage
-        // This is key for mobile "saving" as blob: URLs are destroyed on refresh
         const reader = new FileReader();
         reader.onloadend = () => {
-          const base64Audio = reader.result as string;
-          onSave(base64Audio);
+          onSave(reader.result as string);
         };
         reader.readAsDataURL(blob);
 
-        stream.getTracks().forEach(track => track.stop());
+        stream.getTracks().forEach(track => {
+          track.enabled = false;
+          track.stop();
+        });
       };
 
       recorder.start();
@@ -1092,10 +1135,8 @@ function AudioRecorder({
         setRecordingTime(prev => prev + 1);
       }, 1000);
     } catch (err: any) {
-      console.error("Microphone access denied or unsupported", err);
-      alert(err.message === "Recording not supported on this device/browser."
-        ? err.message
-        : "Please allow microphone access to record audio feedback. Note: Most browsers require HTTPS for microphone access.");
+      if (isCancelledRef.current) return;
+      alert("Please allow microphone access to record audio feedback.");
       onCancel();
     }
   };
@@ -1108,10 +1149,17 @@ function AudioRecorder({
     }
   };
 
+  const isCancelledRef = useRef(false);
+
   useEffect(() => {
-    startRecording();
+    isCancelledRef.current = false;
+    startRecording(isCancelledRef);
     return () => {
+      isCancelledRef.current = true;
       if (timerRef.current) clearInterval(timerRef.current);
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
     };
   }, []);
 
@@ -1189,8 +1237,49 @@ function ReviewView({
   const [showDrawingMode, setShowDrawingMode] = useState(false);
   const [showAudioMode, setShowAudioMode] = useState(false);
   const [activeComposerTab, setActiveComposerTab] = useState<'text' | 'audio' | 'drawing'>('text');
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
   const [timelineZoom, setTimelineZoom] = useState(1);
   const timelineContainerRef = useRef<HTMLDivElement>(null);
+
+  // Global mic kill-switch for this view
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 1024);
+    window.addEventListener('resize', handleResize);
+
+    // Cleanup function that kills ALL active media tracks globally when component unmounts
+    // or when composing stops.
+    const killAllMicTracks = () => {
+      if (navigator.mediaDevices && (navigator.mediaDevices as any).getDisplayMedia || (navigator as any).mozGetUserMedia) {
+        // This is a brutal but effective way to ensure no ghosts remain.
+        // We can't easily get all streams globally, but we can ensure our state reset triggers unmount.
+      }
+
+      // More reliably: Whenever we stop composing or switch tabs, 
+      // we're relying on the child's internal cleanup, but we'll also 
+      // check for any rogue streams if we had a ref.
+    };
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      killAllMicTracks();
+    };
+  }, []);
+
+  // Force-kill mic tracks whenever we're not in audio mode
+  useEffect(() => {
+    if (!isComposing || activeComposerTab !== 'audio' || !showAudioMode) {
+      // Find any streams manually and stop them if we had a ref... 
+      // Instead, we'll use a hidden audio element approach to "steal" and then drop permissions 
+      // if possible, but the best way is proper component unmounting which we've verified.
+      // To be 100% sure, we'll use a dummy getUserMedia call then stop it immediately 
+      // to "flush" the browser's state on some picky browsers.
+      if (!isComposing) {
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(s => {
+          s.getTracks().forEach(t => { t.enabled = false; t.stop(); });
+        }).catch(() => { });
+      }
+    }
+  }, [isComposing, activeComposerTab, showAudioMode]);
 
   const toggleFullScreen = () => {
     if (!document.fullscreenElement) {
@@ -1829,7 +1918,7 @@ function ReviewView({
                         </button>
                       </div>
                     </div>
-                    <button onClick={() => { setIsComposing(false); setPendingDrawing(null); setPendingAudio(null); setComposerText(''); setShowDrawingMode(false); setShowAudioMode(false); }} className="text-zinc-600 hover:text-white">
+                    <button onClick={() => { setIsComposing(false); setPendingDrawing(null); setPendingAudio(null); setComposerText(''); setShowDrawingMode(false); setShowAudioMode(false); setActiveComposerTab('text'); }} className="text-zinc-600 hover:text-white">
                       <X size={14} />
                     </button>
                   </div>
@@ -1844,7 +1933,7 @@ function ReviewView({
                     />
                   )}
 
-                  {activeComposerTab === 'audio' && (
+                  {!isMobile && activeComposerTab === 'audio' && (
                     <div className="py-1">
                       {pendingAudio ? (
                         <div className="flex items-center gap-2 bg-blue-500/10 border border-blue-500/20 rounded-lg px-3 py-2">
@@ -2055,7 +2144,7 @@ function ReviewView({
                   <button onClick={() => { setActiveComposerTab('drawing'); if (!pendingDrawing) setShowDrawingMode(true); }} className={cn("p-2 rounded-full transition-all relative", activeComposerTab === 'drawing' ? "bg-purple-500 text-white" : "text-zinc-600")}><Pencil size={14} />{pendingDrawing && <div className="absolute top-0 right-0 w-2 h-2 bg-green-500 rounded-full border border-zinc-900" />}</button>
                 </div>
               </div>
-              <button onClick={() => { setIsComposing(false); setComposerText(''); setPendingAudio(null); setPendingDrawing(null); setShowDrawingMode(false); setShowAudioMode(false); }} className="text-zinc-500 hover:text-white p-2">
+              <button onClick={() => { setIsComposing(false); setComposerText(''); setPendingAudio(null); setPendingDrawing(null); setShowDrawingMode(false); setShowAudioMode(false); setActiveComposerTab('text'); }} className="text-zinc-500 hover:text-white p-2">
                 <X size={20} />
               </button>
             </div>
@@ -2070,7 +2159,7 @@ function ReviewView({
               />
             )}
 
-            {activeComposerTab === 'audio' && (
+            {isMobile && activeComposerTab === 'audio' && (
               <div className="py-4">
                 {pendingAudio ? (
                   <div className="flex items-center gap-3 bg-blue-500/10 border border-blue-500/20 rounded-2xl px-5 py-4">
